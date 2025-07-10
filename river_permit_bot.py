@@ -24,10 +24,22 @@ logger = logging.getLogger(__name__)
 
 # Recreation.gov API configuration
 API_KEY = os.getenv('RECREATION_API_KEY')
-PERMIT_ID = "250014"
-DIVISIONS = {
-    371: "Dearlodge",
-    380: "Gates of Lodore"
+
+# Multiple permits configuration
+PERMITS = {
+    "250014": {
+        "name": "Green River",
+        "divisions": {
+            371: "Dearlodge",
+            380: "Gates of Lodore"
+        }
+    },
+    "621743": {
+        "name": "Rio Chama River",
+        "divisions": {
+            1: "Rio Chama"
+        }
+    }
 }
 
 # Telegram configuration
@@ -62,14 +74,14 @@ class RiverPermitMonitor:
         })
         return session
     
-    def _load_state(self) -> Dict[int, Set[str]]:
+    def _load_state(self) -> Dict[str, Set[str]]:
         """Load previous availability state from file"""
         if os.path.exists(STATE_FILE):
             try:
                 with open(STATE_FILE, 'r') as f:
                     data = json.load(f)
                     # Convert lists back to sets
-                    return {int(k): set(v) for k, v in data.items()}
+                    return {k: set(v) for k, v in data.items()}
             except Exception as e:
                 logger.error(f"Error loading state: {e}")
         return {}
@@ -84,9 +96,9 @@ class RiverPermitMonitor:
         except Exception as e:
             logger.error(f"Error saving state: {e}")
     
-    def check_division_availability(self, division_id: int) -> Dict[str, Dict]:
+    def check_division_availability(self, permit_id: str, division_id: int) -> Dict[str, Dict]:
         """Check availability for a specific division"""
-        url = f"https://www.recreation.gov/api/permits/{PERMIT_ID}/divisions/{division_id}/availability"
+        url = f"https://www.recreation.gov/api/permits/{permit_id}/divisions/{division_id}/availability"
         
         # Check next 3 months
         today = datetime.now()
@@ -134,7 +146,8 @@ class RiverPermitMonitor:
         data = {
             "chat_id": TELEGRAM_CHANNEL_ID,
             "text": message,
-            "parse_mode": "HTML"
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
         }
         
         try:
@@ -153,25 +166,31 @@ class RiverPermitMonitor:
         # If first run, just save state and send summary
         if self.is_first_run:
             logger.info("First run detected - initializing state without notifications")
-            summary_message = "📊 <b>River Permit Monitor Initial Status</b>\n\n"
+            summary_message = "<b>River Permit Monitor</b> - Initial Status\n\n"
             total_available = 0
             
-            for division_id, division_name in DIVISIONS.items():
-                current_dates = self.check_division_availability(division_id)
-                current_available = set(current_dates.keys())
+            for permit_id, permit_config in PERMITS.items():
+                permit_name = permit_config['name']
+                summary_message += f"<b>{permit_name}</b>\n"
                 
-                # Save initial state
-                self.previous_availability[division_id] = current_available
+                for division_id, division_name in permit_config['divisions'].items():
+                    current_dates = self.check_division_availability(permit_id, division_id)
+                    current_available = set(current_dates.keys())
+                    
+                    # Save initial state with unique key
+                    state_key = f"{permit_id}:{division_id}"
+                    self.previous_availability[state_key] = current_available
+                    
+                    # Add to summary
+                    available_count = len(current_available)
+                    total_available += available_count
+                    summary_message += f"  {division_name}: {available_count} dates\n"
+                    
+                    time.sleep(1)
                 
-                # Add to summary
-                available_count = len(current_available)
-                total_available += available_count
-                summary_message += f"<b>{division_name}</b>: {available_count} dates available\n"
-                
-                time.sleep(1)
+                summary_message += "\n"
             
-            summary_message += f"\n<b>Total:</b> {total_available} dates with availability\n"
-            summary_message += "\n✅ Monitoring active - will notify of NEW availability only"
+            summary_message += f"Monitoring {total_available} available dates. Will notify of NEW availability only."
             
             # Send summary message
             self.send_telegram_message(summary_message)
@@ -180,68 +199,78 @@ class RiverPermitMonitor:
             return
         
         # Normal run - check for new availability
-        for division_id, division_name in DIVISIONS.items():
-            current_dates = self.check_division_availability(division_id)
-            current_available = set(current_dates.keys())
+        for permit_id, permit_config in PERMITS.items():
+            permit_name = permit_config['name']
             
-            # Get previous availability for this division
-            previous_available = self.previous_availability.get(division_id, set())
-            
-            # Find new available dates
-            new_dates = current_available - previous_available
-            
-            if new_dates:
-                # Build notification message
-                message = f"🎉 <b>New River Permit Availability!</b>\n\n"
-                message += f"📍 <b>{division_name}</b>\n"
-                message += f"Permit #{PERMIT_ID}\n\n"
-                message += f"<b>🗓 Newly available dates ({len(new_dates)} total):</b>\n\n"
+            for division_id, division_name in permit_config['divisions'].items():
+                current_dates = self.check_division_availability(permit_id, division_id)
+                current_available = set(current_dates.keys())
                 
-                for date in sorted(new_dates):
-                    info = current_dates[date]
-                    # Format date nicely
-                    date_obj = datetime.strptime(date, '%Y-%m-%d')
-                    formatted_date = date_obj.strftime('%A, %B %d, %Y')
-                    message += f"• <b>{formatted_date}</b>\n"
-                    message += f"  {info['remaining']} of {info['total']} spots available\n\n"
+                # Get previous availability for this division
+                state_key = f"{permit_id}:{division_id}"
+                previous_available = self.previous_availability.get(state_key, set())
                 
-                # Add direct registration link
-                message += f"🔗 <b>Book Now:</b>\n"
-                message += f"<a href='https://www.recreation.gov/permits/{PERMIT_ID}/registration/detailed-availability?type=overnight-permit'>Direct Registration Link</a>\n\n"
-                message += f"📱 <a href='https://www.recreation.gov/permits/{PERMIT_ID}'>Permit Overview Page</a>"
+                # Find new available dates
+                new_dates = current_available - previous_available
                 
-                # Send notification
-                self.send_telegram_message(message)
-                logger.info(f"Found {len(new_dates)} new dates for {division_name}")
-            
-            # Also check for dates that became unavailable
-            lost_dates = previous_available - current_available
-            if lost_dates:
-                logger.info(f"{len(lost_dates)} dates no longer available for {division_name}")
-            
-            # Update state
-            self.previous_availability[division_id] = current_available
-            
-            # Small delay between divisions
-            time.sleep(1)
+                if new_dates:
+                    # Build notification message
+                    message = f"<b>New Availability: {division_name}</b>\n"
+                    message += f"{permit_name}\n\n"
+                    
+                    for date in sorted(new_dates):
+                        info = current_dates[date]
+                        # Format date more concisely
+                        date_obj = datetime.strptime(date, '%Y-%m-%d')
+                        formatted_date = date_obj.strftime('%b %d, %Y')
+                        message += f"• {formatted_date} - {info['remaining']} spots\n"
+                    
+                    # Add direct registration link
+                    message += f"\n<a href='https://www.recreation.gov/permits/{permit_id}/registration/detailed-availability?type=overnight-permit'>Book Now</a>"
+                    
+                    # Send notification
+                    self.send_telegram_message(message)
+                    logger.info(f"Found {len(new_dates)} new dates for {permit_name} - {division_name}")
+                
+                # Also check for dates that became unavailable
+                lost_dates = previous_available - current_available
+                if lost_dates:
+                    logger.info(f"{len(lost_dates)} dates no longer available for {permit_name} - {division_name}")
+                
+                # Update state
+                self.previous_availability[state_key] = current_available
+                
+                # Small delay between divisions
+                time.sleep(1)
         
-        # Save state after checking all divisions
+        # Save state after checking all permits
         self._save_state()
     
     def run(self):
         """Run the monitor continuously"""
         logger.info("Starting River Permit Monitor...")
-        logger.info(f"Monitoring divisions: {list(DIVISIONS.values())}")
+        
+        # Log all permits being monitored
+        for permit_id, permit_config in PERMITS.items():
+            permit_name = permit_config['name']
+            divisions = list(permit_config['divisions'].values())
+            logger.info(f"Monitoring {permit_name} (#{permit_id}): {divisions}")
+        
         logger.info(f"Check interval: {CHECK_INTERVAL} seconds")
         
+        # Build startup message
+        startup_message = "<b>River Permit Monitor Started</b>\n\n"
+        startup_message += "Monitoring:\n"
+        
+        for permit_id, permit_config in PERMITS.items():
+            permit_name = permit_config['name']
+            divisions = list(permit_config['divisions'].values())
+            startup_message += f"• {permit_name}: {', '.join(divisions)}\n"
+        
+        startup_message += f"\nChecking every {CHECK_INTERVAL} seconds for new availability."
+        
         # Send startup message
-        self.send_telegram_message(
-            "🚀 <b>River Permit Monitor Started!</b>\n\n"
-            f"📍 Monitoring: {', '.join(DIVISIONS.values())}\n"
-            f"🎫 Permit ID: #{PERMIT_ID}\n"
-            f"⏱ Check interval: Every {CHECK_INTERVAL} seconds\n\n"
-            "I'll notify you immediately when new spots become available!"
-        )
+        self.send_telegram_message(startup_message)
         
         while True:
             try:
