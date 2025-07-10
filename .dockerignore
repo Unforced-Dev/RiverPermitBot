@@ -1,0 +1,10 @@
+data/
+*.log
+*.pid
+__pycache__/
+*.pyc
+.DS_Store
+setup_telegram_bot.md
+test_telegram.py
+find_divisions.py
+check_availability.py

@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  river-permit-bot:
+    build: .
+    container_name: river-permit-bot
+    restart: always
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATA_DIR=/app/data
+      - PYTHONUNBUFFERED=1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
