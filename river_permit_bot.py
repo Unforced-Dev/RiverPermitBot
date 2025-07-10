@@ -146,7 +146,8 @@ class RiverPermitMonitor:
         data = {
             "chat_id": TELEGRAM_CHANNEL_ID,
             "text": message,
-            "parse_mode": "HTML"
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
         }
         
         try:
@@ -165,12 +166,12 @@ class RiverPermitMonitor:
         # If first run, just save state and send summary
         if self.is_first_run:
             logger.info("First run detected - initializing state without notifications")
-            summary_message = "📊 <b>River Permit Monitor Initial Status</b>\n\n"
+            summary_message = "<b>River Permit Monitor</b> - Initial Status\n\n"
             total_available = 0
             
             for permit_id, permit_config in PERMITS.items():
                 permit_name = permit_config['name']
-                summary_message += f"<b>{permit_name} (#{permit_id})</b>\n"
+                summary_message += f"<b>{permit_name}</b>\n"
                 
                 for division_id, division_name in permit_config['divisions'].items():
                     current_dates = self.check_division_availability(permit_id, division_id)
@@ -183,14 +184,13 @@ class RiverPermitMonitor:
                     # Add to summary
                     available_count = len(current_available)
                     total_available += available_count
-                    summary_message += f"  {division_name}: {available_count} dates available\n"
+                    summary_message += f"  {division_name}: {available_count} dates\n"
                     
                     time.sleep(1)
                 
                 summary_message += "\n"
             
-            summary_message += f"<b>Total:</b> {total_available} dates with availability\n"
-            summary_message += "\n✅ Monitoring active - will notify of NEW availability only"
+            summary_message += f"Monitoring {total_available} available dates. Will notify of NEW availability only."
             
             # Send summary message
             self.send_telegram_message(summary_message)
@@ -215,24 +215,18 @@ class RiverPermitMonitor:
                 
                 if new_dates:
                     # Build notification message
-                    message = f"🎉 <b>New River Permit Availability!</b>\n\n"
-                    message += f"📍 <b>{division_name}</b>\n"
-                    message += f"🏞️ <b>{permit_name}</b>\n"
-                    message += f"Permit #{permit_id}\n\n"
-                    message += f"<b>🗓 Newly available dates ({len(new_dates)} total):</b>\n\n"
+                    message = f"<b>New Availability: {division_name}</b>\n"
+                    message += f"{permit_name}\n\n"
                     
                     for date in sorted(new_dates):
                         info = current_dates[date]
-                        # Format date nicely
+                        # Format date more concisely
                         date_obj = datetime.strptime(date, '%Y-%m-%d')
-                        formatted_date = date_obj.strftime('%A, %B %d, %Y')
-                        message += f"• <b>{formatted_date}</b>\n"
-                        message += f"  {info['remaining']} of {info['total']} spots available\n\n"
+                        formatted_date = date_obj.strftime('%b %d, %Y')
+                        message += f"• {formatted_date} - {info['remaining']} spots\n"
                     
                     # Add direct registration link
-                    message += f"🔗 <b>Book Now:</b>\n"
-                    message += f"<a href='https://www.recreation.gov/permits/{permit_id}/registration/detailed-availability?type=overnight-permit'>Direct Registration Link</a>\n\n"
-                    message += f"📱 <a href='https://www.recreation.gov/permits/{permit_id}'>Permit Overview Page</a>"
+                    message += f"\n<a href='https://www.recreation.gov/permits/{permit_id}/registration/detailed-availability?type=overnight-permit'>Book Now</a>"
                     
                     # Send notification
                     self.send_telegram_message(message)
@@ -265,16 +259,15 @@ class RiverPermitMonitor:
         logger.info(f"Check interval: {CHECK_INTERVAL} seconds")
         
         # Build startup message
-        startup_message = "🚀 <b>River Permit Monitor Started!</b>\n\n"
-        startup_message += "📍 <b>Monitoring:</b>\n"
+        startup_message = "<b>River Permit Monitor Started</b>\n\n"
+        startup_message += "Monitoring:\n"
         
         for permit_id, permit_config in PERMITS.items():
             permit_name = permit_config['name']
             divisions = list(permit_config['divisions'].values())
-            startup_message += f"• {permit_name} (#{permit_id}): {', '.join(divisions)}\n"
+            startup_message += f"• {permit_name}: {', '.join(divisions)}\n"
         
-        startup_message += f"\n⏱ Check interval: Every {CHECK_INTERVAL} seconds\n\n"
-        startup_message += "I'll notify you immediately when new spots become available!"
+        startup_message += f"\nChecking every {CHECK_INTERVAL} seconds for new availability."
         
         # Send startup message
         self.send_telegram_message(startup_message)
