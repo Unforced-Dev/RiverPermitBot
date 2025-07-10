@@ -42,8 +42,9 @@ def test_telegram_bot(token, channel_id):
     
     test_message = {
         "chat_id": channel_id,
-        "text": "🧪 <b>Test Message</b>\n\nThis is a test message from the River Permit Bot.\nIf you see this, your bot is configured correctly!",
-        "parse_mode": "HTML"
+        "text": "<b>Test Message</b>\n\nThis is a test message from the River Permit Bot.\nIf you see this, your bot is configured correctly!",
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
     }
     
     try:

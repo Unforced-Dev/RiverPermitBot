@@ -134,7 +134,8 @@ class RiverPermitMonitor:
         data = {
             "chat_id": TELEGRAM_CHANNEL_ID,
             "text": message,
-            "parse_mode": "HTML"
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
         }
         
         try:
@@ -153,7 +154,7 @@ class RiverPermitMonitor:
         # If first run, just save state and send summary
         if self.is_first_run:
             logger.info("First run detected - initializing state without notifications")
-            summary_message = "📊 <b>River Permit Monitor Initial Status</b>\n\n"
+            summary_message = "<b>River Permit Monitor Started</b>\n\n"
             total_available = 0
             
             for division_id, division_name in DIVISIONS.items():
@@ -166,12 +167,12 @@ class RiverPermitMonitor:
                 # Add to summary
                 available_count = len(current_available)
                 total_available += available_count
-                summary_message += f"<b>{division_name}</b>: {available_count} dates available\n"
+                summary_message += f"<b>{division_name}</b>: {available_count} dates\n"
                 
                 time.sleep(1)
             
-            summary_message += f"\n<b>Total:</b> {total_available} dates with availability\n"
-            summary_message += "\n✅ Monitoring active - will notify of NEW availability only"
+            summary_message += f"\n<b>Total:</b> {total_available} dates available\n"
+            summary_message += "\nMonitoring active - will notify of NEW availability only"
             
             # Send summary message
             self.send_telegram_message(summary_message)
@@ -192,23 +193,17 @@ class RiverPermitMonitor:
             
             if new_dates:
                 # Build notification message
-                message = f"🎉 <b>New River Permit Availability!</b>\n\n"
-                message += f"📍 <b>{division_name}</b>\n"
-                message += f"Permit #{PERMIT_ID}\n\n"
-                message += f"<b>🗓 Newly available dates ({len(new_dates)} total):</b>\n\n"
+                message = f"<b>New Availability: {division_name}</b>\n\n"
                 
                 for date in sorted(new_dates):
                     info = current_dates[date]
                     # Format date nicely
                     date_obj = datetime.strptime(date, '%Y-%m-%d')
-                    formatted_date = date_obj.strftime('%A, %B %d, %Y')
-                    message += f"• <b>{formatted_date}</b>\n"
-                    message += f"  {info['remaining']} of {info['total']} spots available\n\n"
+                    formatted_date = date_obj.strftime('%b %d, %Y')
+                    message += f"• {formatted_date} - {info['remaining']} spots\n"
                 
                 # Add direct registration link
-                message += f"🔗 <b>Book Now:</b>\n"
-                message += f"<a href='https://www.recreation.gov/permits/{PERMIT_ID}/registration/detailed-availability?type=overnight-permit'>Direct Registration Link</a>\n\n"
-                message += f"📱 <a href='https://www.recreation.gov/permits/{PERMIT_ID}'>Permit Overview Page</a>"
+                message += f"\n<a href='https://www.recreation.gov/permits/{PERMIT_ID}/registration/detailed-availability?type=overnight-permit'>Book Now</a>"
                 
                 # Send notification
                 self.send_telegram_message(message)
@@ -236,11 +231,9 @@ class RiverPermitMonitor:
         
         # Send startup message
         self.send_telegram_message(
-            "🚀 <b>River Permit Monitor Started!</b>\n\n"
-            f"📍 Monitoring: {', '.join(DIVISIONS.values())}\n"
-            f"🎫 Permit ID: #{PERMIT_ID}\n"
-            f"⏱ Check interval: Every {CHECK_INTERVAL} seconds\n\n"
-            "I'll notify you immediately when new spots become available!"
+            f"<b>River Permit Monitor Started</b>\n\n"
+            f"Monitoring: {', '.join(DIVISIONS.values())}\n"
+            f"Check interval: Every {CHECK_INTERVAL} seconds"
         )
         
         while True:
