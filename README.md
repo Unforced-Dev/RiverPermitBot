@@ -15,8 +15,21 @@ A Telegram bot that monitors Recreation.gov for River Permit availability and se
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Telegram bot token (already configured)
-- Telegram channel access (already configured)
+- Recreation.gov API key
+- Telegram bot token
+- Telegram channel ID
+
+## Setup
+
+1. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit `.env` with your credentials:
+   - `RECREATION_API_KEY`: Your Recreation.gov API key
+   - `TELEGRAM_BOT_TOKEN`: Your Telegram bot token from @BotFather
+   - `TELEGRAM_CHANNEL_ID`: Your Telegram channel ID
 
 ## Quick Start
 

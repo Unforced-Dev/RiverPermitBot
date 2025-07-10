@@ -16,5 +16,7 @@ VOLUME ["/app/data"]
 # Set environment variable to ensure output is not buffered
 ENV PYTHONUNBUFFERED=1
 
+# Note: Environment variables will be passed from docker-compose.yml or .env file
+
 # Run the bot
 CMD ["python", "river_permit_bot.py"]
