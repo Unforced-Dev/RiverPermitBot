@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  river-permit-bot:
+    build: .
+    container_name: river-permit-bot
+    restart: always
+    volumes:
+      - river-permit-data:/app/data
+    environment:
+      # These will be set in Coolify's environment variables
+      - RECREATION_API_KEY=${RECREATION_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
+      - DATA_DIR=/app/data
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/data') else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  river-permit-data:
+    driver: local
