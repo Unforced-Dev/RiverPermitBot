@@ -347,22 +347,22 @@ class RiverPermitMonitor:
             return
             
         # Handle commands
-        if text.startswith('/start-monitoring'):
+        if text.startswith('/monitor'):
             self._handle_start_monitoring(text)
-        elif text.startswith('/stop-monitoring'):
+        elif text.startswith('/unmonitor'):
             self._handle_stop_monitoring(text)
-        elif text == '/list-permits':
+        elif text == '/list':
             self._handle_list_permits()
         elif text == '/help':
             self._handle_help()
     
     def _handle_start_monitoring(self, command: str):
-        """Handle /start-monitoring [permit-id] [permit-name] command"""
+        """Handle /monitor [permit-id] [permit-name] command"""
         parts = command.split(maxsplit=2)
         if len(parts) < 2:
             self.send_telegram_message(
-                "<b>Usage:</b> /start-monitoring [permit-id] [permit-name]\n"
-                "Example: /start-monitoring 621743 Rio Chama"
+                "<b>Usage:</b> /monitor [permit-id] [permit-name]\n"
+                "Example: /monitor 621743 Rio Chama"
             )
             return
             
@@ -408,12 +408,12 @@ class RiverPermitMonitor:
             )
     
     def _handle_stop_monitoring(self, command: str):
-        """Handle /stop-monitoring [permit-id] command"""
+        """Handle /unmonitor [permit-id] command"""
         parts = command.split()
         if len(parts) != 2:
             self.send_telegram_message(
-                "<b>Usage:</b> /stop-monitoring [permit-id]\n"
-                "Example: /stop-monitoring 621743"
+                "<b>Usage:</b> /unmonitor [permit-id]\n"
+                "Example: /unmonitor 621743"
             )
             return
             
@@ -423,7 +423,7 @@ class RiverPermitMonitor:
         if permit_id not in current_permits:
             self.send_telegram_message(
                 f"<b>Not monitoring permit {permit_id}</b>\n\n"
-                f"Use /list-permits to see currently monitored permits."
+                f"Use /list to see currently monitored permits."
             )
             return
         
@@ -438,14 +438,14 @@ class RiverPermitMonitor:
             )
     
     def _handle_list_permits(self):
-        """Handle /list-permits command"""
+        """Handle /list command"""
         permits = self.permit_manager.list_permits()
         if permits:
             message = "<b>Currently monitoring:</b>\n\n"
             for permit in permits:
                 message += f"• {permit}\n"
         else:
-            message = "<b>No permits being monitored</b>\n\nUse /start-monitoring to add permits."
+            message = "<b>No permits being monitored</b>\n\nUse /monitor to add permits."
         
         self.send_telegram_message(message)
     
@@ -453,13 +453,13 @@ class RiverPermitMonitor:
         """Handle /help command"""
         help_text = (
             "<b>River Permit Monitor Commands:</b>\n\n"
-            "<b>/start-monitoring [permit-id] [name]</b>\n"
+            "<b>/monitor [permit-id] [name]</b>\n"
             "Start monitoring a new permit. The bot will automatically discover divisions.\n"
-            "Example: /start-monitoring 621743 Rio Chama\n\n"
-            "<b>/stop-monitoring [permit-id]</b>\n"
+            "Example: /monitor 621743 Rio Chama\n\n"
+            "<b>/unmonitor [permit-id]</b>\n"
             "Stop monitoring a permit.\n"
-            "Example: /stop-monitoring 621743\n\n"
-            "<b>/list-permits</b>\n"
+            "Example: /unmonitor 621743\n\n"
+            "<b>/list</b>\n"
             "Show all currently monitored permits.\n\n"
             "<b>/help</b>\n"
             "Show this help message.\n\n"
@@ -507,7 +507,7 @@ class RiverPermitMonitor:
             return
         
         # Normal run - check for new availability
-        for permit_id, permit_config in PERMITS.items():
+        for permit_id, permit_config in self.permit_manager.get_permits().items():
             permit_name = permit_config['name']
             
             for division_id, division_name in permit_config['divisions'].items():
