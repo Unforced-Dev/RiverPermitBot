@@ -1,0 +1,53 @@
+name: Deploy to Coolify (Advanced)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # Option 1: Deploy via Webhook (Recommended)
+      - name: Deploy via Webhook
+        if: ${{ vars.DEPLOY_METHOD == 'webhook' || vars.DEPLOY_METHOD == '' }}
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.COOLIFY_WEBHOOK_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.COOLIFY_WEBHOOK_URL }}"
+      
+      # Option 2: Deploy via SSH (Alternative)
+      - name: Deploy via SSH
+        if: ${{ vars.DEPLOY_METHOD == 'ssh' }}
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.COOLIFY_HOST }}
+          username: ${{ secrets.COOLIFY_USERNAME }}
+          key: ${{ secrets.COOLIFY_SSH_KEY }}
+          port: ${{ secrets.COOLIFY_SSH_PORT || 22 }}
+          script: |
+            cd /home/coolify
+            docker compose -f docker-compose.yml pull
+            docker compose -f docker-compose.yml up -d --force-recreate
+      
+      # Notify deployment status (optional)
+      - name: Notify Deployment Success
+        if: success() && vars.TELEGRAM_NOTIFY == 'true'
+        run: |
+          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHANNEL_ID }}" \
+            -d "text=✅ River Permit Bot deployed successfully to Coolify!"
+      
+      - name: Notify Deployment Failure
+        if: failure() && vars.TELEGRAM_NOTIFY == 'true'
+        run: |
+          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHANNEL_ID }}" \
+            -d "text=❌ River Permit Bot deployment to Coolify failed!"
