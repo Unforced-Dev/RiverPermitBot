@@ -29,16 +29,10 @@ API_KEY = os.getenv('RECREATION_API_KEY')
 # Default permits configuration for migration
 DEFAULT_PERMITS = {
     "250014": {
-        "name": "Green River",
+        "name": "Dinosaur Green And Yampa River Permits",
         "divisions": {
-            371: "Dearlodge",
-            380: "Gates of Lodore"
-        }
-    },
-    "621743": {
-        "name": "Rio Chama River", 
-        "divisions": {
-            1: "Rio Chama"
+            371: "Deerlodge Park, Yampa River",
+            380: "Gates of Lodore, Green River"
         }
     }
 }
@@ -210,7 +204,6 @@ class PermitConfigManager:
                     break
         
         if not divisions:
-            errors.append(f"No valid divisions found for permit {permit_id}")
             # Try some common alternative patterns
             for div_id in [0, 100, 200, 500, 1000]:
                 if self._test_division(permit_id, div_id, session):
@@ -218,6 +211,20 @@ class PermitConfigManager:
                     divisions[div_id] = div_name if div_name else f"Division {div_id}"
                     break
                 time.sleep(0.3)
+            
+            if not divisions:
+                # Check if this is actually a valid permit by testing the permit endpoint
+                permit_url = f"https://www.recreation.gov/api/permits/{permit_id}"
+                try:
+                    resp = session.get(permit_url, timeout=10)
+                    if resp.status_code == 404:
+                        errors.append(f"Permit {permit_id} not found in Recreation.gov system")
+                        errors.append("This ID may be listed in search but is not a valid permit")
+                    else:
+                        errors.append(f"No valid divisions found for permit {permit_id}")
+                        errors.append("This permit may not use the division system")
+                except Exception as e:
+                    errors.append(f"Error validating permit {permit_id}: {str(e)}")
         
         return divisions, errors
     
