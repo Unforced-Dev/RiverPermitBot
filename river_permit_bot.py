@@ -122,13 +122,54 @@ class PermitConfigManager:
             logger.error(f"Error removing permit {permit_id}: {e}")
             return False
     
+    def add_division(self, permit_id: str, division_id: int, division_name: str) -> bool:
+        """Add a specific division to an existing permit"""
+        try:
+            if permit_id not in self.permits:
+                return False
+            
+            new_permits = self.permits.copy()
+            new_permits[permit_id]['divisions'][division_id] = division_name
+            self._save_permits(new_permits)
+            logger.info(f"Added division {division_id} ({division_name}) to permit {permit_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error adding division {division_id} to permit {permit_id}: {e}")
+            return False
+    
+    def remove_division(self, permit_id: str, division_id: int) -> bool:
+        """Remove a specific division from a permit"""
+        try:
+            if permit_id not in self.permits:
+                return False
+            
+            if division_id not in self.permits[permit_id]['divisions']:
+                return False
+            
+            new_permits = self.permits.copy()
+            division_name = new_permits[permit_id]['divisions'][division_id]
+            del new_permits[permit_id]['divisions'][division_id]
+            
+            # If no divisions left, remove the entire permit
+            if not new_permits[permit_id]['divisions']:
+                del new_permits[permit_id]
+                logger.info(f"Removed last division from permit {permit_id}, removing permit")
+            
+            self._save_permits(new_permits)
+            logger.info(f"Removed division {division_id} ({division_name}) from permit {permit_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error removing division {division_id} from permit {permit_id}: {e}")
+            return False
+    
     def list_permits(self) -> List[str]:
         """Get list of permit descriptions for display"""
         result = []
         for permit_id, config in self.permits.items():
             name = config['name']
-            divisions = list(config['divisions'].values())
-            result.append(f"{name} (#{permit_id}): {', '.join(divisions)}")
+            divisions = config['divisions']
+            div_list = [f"{div_name} [{div_id}]" for div_id, div_name in divisions.items()]
+            result.append(f"{name} (#{permit_id}): {', '.join(div_list)}")
         return result
     
     def discover_divisions(self, permit_id: str, session: requests.Session, 
@@ -150,13 +191,16 @@ class PermitConfigManager:
         for test_range in test_ranges:
             for div_id in test_range:
                 if self._test_division(permit_id, div_id, session):
-                    # Use generic name if permit name not provided
-                    if permit_name:
-                        div_name = f"{permit_name} Div {div_id}"
-                    else:
-                        div_name = f"Division {div_id}"
+                    # Try to get the actual division name from API
+                    div_name = self._get_division_name(permit_id, div_id, session)
+                    if not div_name:
+                        # Fallback to generic name
+                        if permit_name:
+                            div_name = f"{permit_name} Div {div_id}"
+                        else:
+                            div_name = f"Division {div_id}"
                     divisions[div_id] = div_name
-                    logger.info(f"Found valid division {div_id} for permit {permit_id}")
+                    logger.info(f"Found valid division {div_id} ({div_name}) for permit {permit_id}")
                 
                 # Rate limiting
                 time.sleep(0.3)
@@ -170,7 +214,8 @@ class PermitConfigManager:
             # Try some common alternative patterns
             for div_id in [0, 100, 200, 500, 1000]:
                 if self._test_division(permit_id, div_id, session):
-                    divisions[div_id] = f"Division {div_id}"
+                    div_name = self._get_division_name(permit_id, div_id, session)
+                    divisions[div_id] = div_name if div_name else f"Division {div_id}"
                     break
                 time.sleep(0.3)
         
@@ -206,6 +251,28 @@ class PermitConfigManager:
             logger.debug(f"Division {division_id} test failed: {e}")
         
         return False
+    
+    def _get_division_name(self, permit_id: str, division_id: int, session: requests.Session) -> Optional[str]:
+        """Get division name from Recreation.gov API"""
+        # Get the permit details which includes all divisions
+        url = f"https://www.recreation.gov/api/permits/{permit_id}"
+        
+        try:
+            resp = session.get(url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if 'payload' in data and 'divisions' in data['payload']:
+                    divisions = data['payload']['divisions']
+                    # Division IDs are stored as strings in the API
+                    div_id_str = str(division_id)
+                    if div_id_str in divisions:
+                        return divisions[div_id_str].get('name', f'Division {division_id}')
+            else:
+                logger.debug(f"Could not fetch permit details for division lookup: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.debug(f"Could not fetch division name from permit endpoint: {e}")
+        
+        return None
 
 class RiverPermitMonitor:
     def __init__(self):
@@ -293,6 +360,79 @@ class RiverPermitMonitor:
         
         return {}
     
+    def get_permit_details(self, permit_id: str) -> Optional[Dict[str, str]]:
+        """Fetch permit details including name from Recreation.gov API"""
+        url = f"https://www.recreation.gov/api/permits/{permit_id}"
+        
+        try:
+            resp = self.session.get(url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                # The actual data is in the payload
+                if 'payload' in data:
+                    payload = data['payload']
+                    return {
+                        'name': payload.get('name', f'Permit {permit_id}'),
+                        'description': payload.get('directions', ''),
+                        'type': payload.get('category', '')
+                    }
+                else:
+                    return {
+                        'name': data.get('facility_name', f'Permit {permit_id}'),
+                        'description': data.get('description', ''),
+                        'type': data.get('permit_type', '')
+                    }
+            else:
+                logger.error(f"Failed to fetch permit details for {permit_id}: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.error(f"Error fetching permit details for {permit_id}: {e}")
+        
+        return None
+    
+    def get_division_details(self, permit_id: str, division_id: int) -> Optional[str]:
+        """Fetch division name from Recreation.gov API"""
+        # First get the permit details which includes all divisions
+        url = f"https://www.recreation.gov/api/permits/{permit_id}"
+        
+        try:
+            resp = self.session.get(url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if 'payload' in data and 'divisions' in data['payload']:
+                    divisions = data['payload']['divisions']
+                    # Division IDs are stored as strings in the API
+                    div_id_str = str(division_id)
+                    if div_id_str in divisions:
+                        return divisions[div_id_str].get('name', f'Division {division_id}')
+            else:
+                logger.debug(f"Could not fetch permit details for division lookup: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.debug(f"Could not fetch division name from permit endpoint: {e}")
+        
+        # Fallback: try the availability endpoint which might have metadata
+        url = f"https://www.recreation.gov/api/permits/{permit_id}/divisions/{division_id}/availability"
+        today = datetime.now()
+        params = {
+            "start_date": today.strftime('%Y-%m-%d') + "T06:00:00.000Z",
+            "end_date": today.strftime('%Y-%m-%d') + "T06:00:00.000Z",
+            "commercial_acct": "false",
+            "is_lottery": "false"
+        }
+        
+        try:
+            resp = self.session.get(url, params=params, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                # Check various possible locations for division info
+                if 'division' in data:
+                    return data['division'].get('name', None)
+                elif 'metadata' in data and 'division_name' in data['metadata']:
+                    return data['metadata']['division_name']
+        except Exception as e:
+            logger.debug(f"Could not fetch division name from availability endpoint: {e}")
+        
+        return None
+    
     def send_telegram_message(self, message: str):
         """Send a message to the Telegram channel"""
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -347,7 +487,11 @@ class RiverPermitMonitor:
             return
             
         # Handle commands
-        if text.startswith('/monitor'):
+        if text.startswith('/monitor_division'):
+            self._handle_monitor_division(text)
+        elif text.startswith('/unmonitor_division'):
+            self._handle_unmonitor_division(text)
+        elif text.startswith('/monitor'):
             self._handle_start_monitoring(text)
         elif text.startswith('/unmonitor'):
             self._handle_stop_monitoring(text)
@@ -362,12 +506,13 @@ class RiverPermitMonitor:
         if len(parts) < 2:
             self.send_telegram_message(
                 "<b>Usage:</b> /monitor [permit-id] [permit-name]\n"
-                "Example: /monitor 621743 Rio Chama"
+                "Example: /monitor 621743\n"
+                "Example: /monitor 621743 CustomName\n\n"
+                "Permit name is optional - will be discovered automatically."
             )
             return
             
         permit_id = parts[1]
-        permit_name = parts[2] if len(parts) > 2 else f"Permit {permit_id}"
         
         # Check if already monitoring
         current_permits = self.permit_manager.get_permits()
@@ -377,9 +522,21 @@ class RiverPermitMonitor:
             )
             return
         
+        # If permit name provided, use it; otherwise discover it
+        if len(parts) > 2:
+            permit_name = parts[2]
+        else:
+            self.send_telegram_message(
+                f"<b>Discovering permit details for {permit_id}...</b>"
+            )
+            permit_details = self.get_permit_details(permit_id)
+            permit_name = permit_details['name'] if permit_details else f"Permit {permit_id}"
+            if permit_details:
+                logger.info(f"Discovered permit name: {permit_name}")
+        
         # Discover divisions
         self.send_telegram_message(
-            f"<b>Discovering divisions for permit {permit_id}...</b>\n"
+            f"<b>Discovering divisions for {permit_name} (#{permit_id})...</b>\n"
             f"This may take a moment..."
         )
         
@@ -390,7 +547,7 @@ class RiverPermitMonitor:
         if divisions:
             # Add to monitoring
             if self.permit_manager.add_permit(permit_id, permit_name, divisions):
-                div_list = [f"{name} ({div_id})" for div_id, name in divisions.items()]
+                div_list = [f"{name} [{div_id}]" for div_id, name in divisions.items()]
                 self.send_telegram_message(
                     f"<b>✓ Started monitoring:</b> {permit_name} (#{permit_id})\n\n"
                     f"<b>Divisions found:</b>\n" + "\n".join(f"• {div}" for div in div_list)
@@ -449,6 +606,136 @@ class RiverPermitMonitor:
         
         self.send_telegram_message(message)
     
+    def _handle_monitor_division(self, command: str):
+        """Handle /monitor_division [permit-id] [division-id] [division-name] command"""
+        parts = command.split(maxsplit=3)
+        if len(parts) < 3:
+            self.send_telegram_message(
+                "<b>Usage:</b> /monitor_division [permit-id] [division-id] [division-name]\n"
+                "Example: /monitor_division 250014 371\n"
+                "Example: /monitor_division 250014 371 CustomName\n\n"
+                "Division name is optional - will be discovered automatically.\n"
+                "Use /list to see current permit and division IDs."
+            )
+            return
+            
+        permit_id = parts[1]
+        try:
+            division_id = int(parts[2])
+        except ValueError:
+            self.send_telegram_message(
+                "<b>Error:</b> Division ID must be a number.\n"
+                "Example: /monitor_division 250014 371"
+            )
+            return
+            
+        # If division name provided, use it; otherwise discover it
+        if len(parts) > 3:
+            division_name = parts[3]
+        else:
+            self.send_telegram_message(
+                f"<b>Discovering division name for {permit_id}:{division_id}...</b>"
+            )
+            discovered_name = self.get_division_details(permit_id, division_id)
+            division_name = discovered_name if discovered_name else f"Division {division_id}"
+            if discovered_name:
+                logger.info(f"Discovered division name: {discovered_name}")
+        
+        # Check if permit exists
+        current_permits = self.permit_manager.get_permits()
+        if permit_id not in current_permits:
+            # If permit doesn't exist, discover permit name and create it
+            self.send_telegram_message(
+                f"<b>Discovering permit details for {permit_id}...</b>"
+            )
+            permit_details = self.get_permit_details(permit_id)
+            permit_name = permit_details['name'] if permit_details else f"Permit {permit_id}"
+            
+            if self.permit_manager.add_permit(permit_id, permit_name, {division_id: division_name}):
+                self.send_telegram_message(
+                    f"<b>✓ Created new permit and added division:</b>\n"
+                    f"Permit: {permit_name} (#{permit_id})\n"
+                    f"Division: {division_name} [{division_id}]"
+                )
+            else:
+                self.send_telegram_message(
+                    f"<b>✗ Error:</b> Failed to create permit {permit_id}"
+                )
+        else:
+            # Add division to existing permit
+            if division_id in current_permits[permit_id]['divisions']:
+                self.send_telegram_message(
+                    f"<b>Already monitoring:</b>\n"
+                    f"Permit: {current_permits[permit_id]['name']} (#{permit_id})\n"
+                    f"Division: {current_permits[permit_id]['divisions'][division_id]} [{division_id}]"
+                )
+            elif self.permit_manager.add_division(permit_id, division_id, division_name):
+                self.send_telegram_message(
+                    f"<b>✓ Added division to permit:</b>\n"
+                    f"Permit: {current_permits[permit_id]['name']} (#{permit_id})\n"
+                    f"Division: {division_name} [{division_id}]"
+                )
+            else:
+                self.send_telegram_message(
+                    f"<b>✗ Error:</b> Failed to add division {division_id} to permit {permit_id}"
+                )
+    
+    def _handle_unmonitor_division(self, command: str):
+        """Handle /unmonitor_division [permit-id] [division-id] command"""
+        parts = command.split()
+        if len(parts) != 3:
+            self.send_telegram_message(
+                "<b>Usage:</b> /unmonitor_division [permit-id] [division-id]\n"
+                "Example: /unmonitor_division 250014 371\n\n"
+                "Use /list to see current permit and division IDs."
+            )
+            return
+            
+        permit_id = parts[1]
+        try:
+            division_id = int(parts[2])
+        except ValueError:
+            self.send_telegram_message(
+                "<b>Error:</b> Division ID must be a number.\n"
+                "Example: /unmonitor_division 250014 371"
+            )
+            return
+            
+        current_permits = self.permit_manager.get_permits()
+        if permit_id not in current_permits:
+            self.send_telegram_message(
+                f"<b>Not monitoring permit {permit_id}</b>\n\n"
+                f"Use /list to see currently monitored permits."
+            )
+            return
+            
+        if division_id not in current_permits[permit_id]['divisions']:
+            self.send_telegram_message(
+                f"<b>Not monitoring division {division_id} for permit {permit_id}</b>\n\n"
+                f"Use /list to see currently monitored divisions."
+            )
+            return
+        
+        division_name = current_permits[permit_id]['divisions'][division_id]
+        if self.permit_manager.remove_division(permit_id, division_id):
+            # Check if permit was removed entirely
+            updated_permits = self.permit_manager.get_permits()
+            if permit_id not in updated_permits:
+                self.send_telegram_message(
+                    f"<b>✓ Removed last division from permit:</b>\n"
+                    f"Permit {current_permits[permit_id]['name']} (#{permit_id}) has been removed entirely."
+                )
+            else:
+                self.send_telegram_message(
+                    f"<b>✓ Stopped monitoring division:</b>\n"
+                    f"Permit: {current_permits[permit_id]['name']} (#{permit_id})\n"
+                    f"Division: {division_name} [{division_id}]"
+                )
+        else:
+            self.send_telegram_message(
+                f"<b>✗ Error:</b> Failed to remove division {division_id} from permit {permit_id}"
+            )
+    
     def _handle_help(self):
         """Handle /help command"""
         help_text = (
@@ -459,8 +746,14 @@ class RiverPermitMonitor:
             "<b>/unmonitor [permit-id]</b>\n"
             "Stop monitoring a permit.\n"
             "Example: /unmonitor 621743\n\n"
+            "<b>/monitor_division [permit-id] [division-id] [division-name]</b>\n"
+            "Monitor a specific division. Creates permit if it doesn't exist.\n"
+            "Example: /monitor_division 250014 371 Dearlodge\n\n"
+            "<b>/unmonitor_division [permit-id] [division-id]</b>\n"
+            "Stop monitoring a specific division.\n"
+            "Example: /unmonitor_division 250014 371\n\n"
             "<b>/list</b>\n"
-            "Show all currently monitored permits.\n\n"
+            "Show all currently monitored permits with division IDs.\n\n"
             "<b>/help</b>\n"
             "Show this help message.\n\n"
             "<i>Note: Commands only work from the configured channel.</i>"
@@ -581,19 +874,26 @@ class RiverPermitMonitor:
         # Send startup message
         self.send_telegram_message(startup_message)
         
+        # Track time for permit checks
+        last_permit_check = time.time()
+        
         while True:
             try:
-                # Check for Telegram commands
+                # Check for Telegram commands every 2 seconds
                 self.check_telegram_commands()
                 
-                # Check availability and notify
-                self.check_and_notify()
+                # Check availability only every CHECK_INTERVAL seconds
+                current_time = time.time()
+                if current_time - last_permit_check >= CHECK_INTERVAL:
+                    self.check_and_notify()
+                    last_permit_check = current_time
+                    logger.info(f"Next permit check in {CHECK_INTERVAL} seconds...")
+                
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
             
-            # Wait for next check
-            logger.info(f"Waiting {CHECK_INTERVAL} seconds until next check...")
-            time.sleep(CHECK_INTERVAL)
+            # Wait 2 seconds before next command check
+            time.sleep(2)
 
 def main():
     # Check if required environment variables are configured
